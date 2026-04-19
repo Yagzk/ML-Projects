@@ -1,10 +1,10 @@
-# 🎓 University Admission — Advanced Logistic Regression (1) logistic parameter + 2) admission)
+# 🎓 University Admission — Advanced Logistic Regression (odev12 + odev13)
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue) ![Algorithm](https://img.shields.io/badge/Algorithm-Logistic%20Regression-orange) ![Status](https://img.shields.io/badge/Status-Complete-brightgreen)
+![Python](https://img.shields.io/badge/Python-3.10+-blue) ![Algorithm](https://img.shields.io/badge/Algorithm-Logistic%20Regression%20%7C%20SMOTE%20%7C%20GridSearch-orange) ![Status](https://img.shields.io/badge/Status-Complete-brightgreen)
 
 ## 📌 Overview
 
-Two-notebook progression on graduate school admission prediction — both using the same dataset but tackling increasingly complex challenges. **1) logistic parameter** focuses on VIF-based feature selection and baseline logistic regression. **2) admission** extends this with outlier removal (IQR), a stricter admission threshold, and SMOTE to handle class imbalance.
+Two-notebook progression using the same admission dataset with increasing complexity. **odev12** builds the baseline VIF + Logistic Regression pipeline with SGD and L1/L2 comparison. **odev13** raises the admission threshold to 0.80, adds outlier removal (IQR), applies SMOTE for class imbalance, and compares GridSearchCV vs RandomizedSearchCV for hyperparameter tuning.
 
 ---
 
@@ -12,62 +12,43 @@ Two-notebook progression on graduate school admission prediction — both using 
 
 | Property | Value |
 |----------|-------|
-| Source | Graduate Admissions Dataset |
 | File | `Admission_Predict.csv` |
 | Rows | 500 applicants |
 | Task | Binary Classification |
 
-**Features:**
-| Column | Description | Range |
-|--------|-------------|-------|
-| `GRE Score` | Graduate Record Exam score | 0–340 |
-| `TOEFL Score` | English proficiency score | 0–120 |
-| `University Rating` | University prestige | 1–5 |
-| `SOP` | Statement of Purpose quality | 1–5 |
-| `LOR` | Letter of Recommendation strength | 1–5 |
-| `CGPA` | Undergraduate GPA | 1–10 |
-| `Research` | Research experience | 0/1 |
+| Notebook | Threshold | Key Addition |
+|----------|-----------|--------------|
+| odev12 | ≥ 0.75 | VIF, SGD, L1/L2 regularization |
+| odev13 | ≥ 0.80 | Outlier removal, SMOTE, GridSearch vs RandomizedSearch |
 
 ---
 
 ## 📂 Notebooks
 
-### v1 — `1) logistic parameter` · Baseline + VIF Feature Selection
+### `1__logistic_parameter.ipynb` (odev12) — Baseline + Regularization Comparison
 
-**Target:** `Chance of Admit ≥ 0.75` → binary (0/1)
+Same as `10_university_admission_logistic` — VIF analysis, baseline LogisticRegression, SGD, and L1/L2 regularization on the ≥0.75 threshold.
 
-**Pipeline:**
-1. EDA — korelasyon heatmap, tüm değerler numerik, eksik değer yok
-2. **VIF Analizi** — multikollinearite kontrolü
-```python
-from statsmodels.stats.outliers_influence import variance_inflation_factor
-V = add_constant(data[["GRE Score", "TOEFL Score", "University Rating",
-                        "SOP", "LOR ", "CGPA", "Research"]])
-vif_data["VIF"] = [variance_inflation_factor(V.values, i) for i in range(V.shape[1])]
-```
-**Karar:** Tüm VIF değerleri 5'in altında → GRE ve TOEFL çıkarılmadı. Ancak **LOR** çıkarıldı — hem binary ile korelasyonu düşük, hem de SOP ile örtüşüyor.
-
-3. Logistic Regression eğitimi, confusion matrix, classification report
+See [10_university_admission_logistic](../10_university_admission_logistic/) for full details.
 
 ---
 
-### v2 — `odev_13.ipynb` · Outlier Removal + SMOTE
+### `2__admission.ipynb` (odev13) — Advanced Pipeline
 
-**Target:** `Chance of Admit ≥ 0.80` → daha seçici eşik, daha dengesiz sınıf
+**Target:** `Chance of Admit ≥ 0.80` → more selective, creates class imbalance
 
-**v1'e göre eklemeler:**
-
-#### Aykırı Değer Tespiti — Boxplot + Z-Score
+#### 1. Outlier Detection — Boxplot + Z-Score
 ```python
 # Tüm sayısal değişkenler için yatay boxplot
 sns.boxplot(data=data[numeric_cols], orient="h", palette="Set2")
 
-# Z-score ile kontrol
+# Z-score kontrolü
 z_scores = np.abs(stats.zscore(data["CGPA"]))
 outliers_z = data[z_scores > 3]
+print("Z-Score outlier count:", outliers_z.shape[0])
 ```
 
-#### IQR ile Aykırı Değer Temizleme
+#### 2. IQR Outlier Removal
 ```python
 def remove_outliers_iqr(data, column):
     Q1 = data[column].quantile(0.25)
@@ -81,43 +62,94 @@ for col in X:
     data = remove_outliers_iqr(data, col)
 ```
 
-#### Sınıf Dengesizliği Kontrolü + SMOTE
+#### 3. SMOTE — Class Imbalance Handling
 ```python
 from collections import Counter
-print("SMOTE öncesi:", Counter(y_train))
-
 from imblearn.over_sampling import SMOTE
+
+print("Before SMOTE:", Counter(y_train))
+
 smote = SMOTE(random_state=42)
-X_train_resampled, y_train_resampled = smote.fit_resample(X_train_scaled, y_train)
-print("SMOTE sonrası:", Counter(y_train_resampled))
+X_train, y_train = smote.fit_resample(X_train, y_train)
+
+print("After SMOTE:", Counter(y_train))
 ```
-> ⚠️ SMOTE sadece training set'e uygulandı — test seti orijinal haliyle kaldı.
+> ⚠️ SMOTE was applied **only to the training set** — the test set remains untouched.
+> **Order matters:** SMOTE → then StandardScaler
+
+```python
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled  = scaler.transform(X_test)
+```
+
+#### 4. GridSearchCV vs RandomizedSearchCV Karşılaştırması
+```python
+# GridSearch
+param_grid = {'C': [0.001, 0.01, 0.1, 1, 10]}
+log_reg = LogisticRegression(multi_class='multinomial', solver='lbfgs',
+                              max_iter=500, class_weight='balanced')
+grid_search = GridSearchCV(log_reg, param_grid, cv=5)
+
+# RandomizedSearch
+random_search = RandomizedSearchCV(log_reg, param_distributions, n_iter=50, cv=5)
+```
+
+#### 5. Tüm Modellerin Karşılaştırması
+```python
+accuracies = [base_accuracy, grid_accuracy, random_accuracy]
+models = ['Default', 'GridSearch', 'RandomizedSearch']
+plt.bar(models, accuracies)
+```
+
+**Metric comparison:**
+```python
+def get_classification_metrics(model, X_test, y_test):
+    metrics = {
+        "Accuracy":  accuracy_score(y_test, y_pred),
+        "Precision": precision_score(y_test, y_pred, average='macro'),
+        "Recall":    recall_score(y_test, y_pred, average='macro'),
+        "F1":        f1_score(y_test, y_pred, average='macro'),
+        "ROC-AUC":   roc_auc_score(y_test, y_pred)
+    }
+```
+
+> **Finding:** RandomizedSearch outperformed GridSearch. RandomizedSearch with the `liblinear` solver (ideal for small datasets + L1) produced the most consistent results.
+
+#### 6. Confusion Matrix Karşılaştırması (3 Model)
+```python
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+# Base | GridSearch | RandomizedSearch confusion matrices yan yana
+```
 
 ---
 
-## 🆚 1) logistic parameter vs 2) admission Karşılaştırması
+## 🆚 odev12 vs odev13
 
-| Aspect | 1) logistic parameter | 2) admission |
+| Aspect | odev12 | odev13 |
 |--------|--------|--------|
-| Kabul eşiği | ≥ 0.75 | ≥ 0.80 (daha seçici) |
-| Aykırı değer işleme | Yok | Z-score + IQR temizleme |
-| Sınıf dengesizliği | Ele alınmadı | SMOTE uygulandı |
-| VIF analizi | ✅ | ✅ |
-| Zorluk seviyesi | Orta | İleri |
+| Admission threshold | ≥ 0.75 | ≥ 0.80 (more selective) |
+| Outlier analysis | None | Boxplot + Z-score + IQR removal |
+| Class imbalance | Not handled | SMOTE applied |
+| Hyperparameter tuning | Default | GridSearch + RandomizedSearch |
+| Evaluation | Accuracy, F1 | Accuracy, Precision, Recall, F1, ROC-AUC |
 
 ---
 
 ## 📦 Libraries Used
 ```python
-pandas, numpy, scipy (stats.zscore), sklearn (LogisticRegression, StandardScaler,
-train_test_split, classification_report, confusion_matrix),
-imblearn (SMOTE), statsmodels (VIF), seaborn, matplotlib, collections (Counter)
+pandas, numpy, scipy (stats), seaborn, matplotlib, collections (Counter),
+sklearn (LogisticRegression, SGDClassifier, StandardScaler, GridSearchCV,
+RandomizedSearchCV, train_test_split, accuracy_score, classification_report,
+confusion_matrix, precision_score, recall_score, f1_score, roc_auc_score),
+imblearn (SMOTE), statsmodels (VIF)
 ```
 
 ---
 
 ## 💡 Key Takeaways
-- Eşiği 0.75'ten 0.80'e çıkarmak sınıf dengesizliğini artırır — SMOTE zorunlu hale gelir
-- **IQR > Z-score** — küçük veri setlerinde Z-score normallik varsayar, IQR daha sağlamdır
-- SMOTE yalnızca training set'e uygulanmalı — test seti asla augment edilmemeli
-- LOR'un çıkarılması veri destekli bir karar — sezgiye değil VIF + korelasyon analizine dayalı
+- Raising the threshold from 0.75→0.80 increases class imbalance → SMOTE becomes necessary
+- **Order of SMOTE matters:** Split → SMOTE → Scale (reverse order causes data leakage)
+- RandomizedSearch outperformed GridSearch — preferred for large parameter spaces
+- `average='macro'` → all classes weighted equally, correct choice for imbalanced data
+- IQR > Z-score: Z-score assumes normality on small datasets; IQR is more robust

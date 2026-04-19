@@ -1,10 +1,10 @@
-# 🎙️ Speech Emotion Recognition — RAVDESS Dataset (SVM + MFCC)
+# 🎙️ RAVDESS — Speech Emotion Recognition
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue) ![Algorithm](https://img.shields.io/badge/Algorithm-SVM-orange) ![Domain](https://img.shields.io/badge/Domain-Audio%20ML-purple) ![Status](https://img.shields.io/badge/Status-Complete-brightgreen)
+![Python](https://img.shields.io/badge/Python-3.10+-blue) ![Algorithm](https://img.shields.io/badge/Algorithm-SVM%20%7C%20MFCC-orange) ![Status](https://img.shields.io/badge/Status-Complete-brightgreen)
 
 ## 📌 Overview
 
-A **speech emotion recognition** system trained on the RAVDESS (Ryerson Audio-Visual Database of Emotional Speech and Song) dataset. Audio recordings are converted into numerical feature vectors using **MFCC (Mel-Frequency Cepstral Coefficients)**, and a **Support Vector Machine (SVM)** classifier is trained to recognize the emotional state of the speaker.
+Audio-based emotion classification using the RAVDESS (Ryerson Audio-Visual Database of Emotional Speech and Song) dataset. Speech features are extracted using **MFCC (Mel-Frequency Cepstral Coefficients)** via librosa, and a **Support Vector Machine (SVM)** is trained inside a sklearn Pipeline with GridSearchCV optimization. The final model is serialized with joblib and can predict emotions from new `.wav` files.
 
 ---
 
@@ -12,104 +12,104 @@ A **speech emotion recognition** system trained on the RAVDESS (Ryerson Audio-Vi
 
 | Property | Value |
 |----------|-------|
-| Name | RAVDESS — Ryerson Audio-Visual Database of Emotional Speech and Song |
-| Modality | Audio (WAV files) |
-| Emotions | Neutral, Calm, Happy, Sad, Angry, Fearful, Disgust, Surprised |
-| Speakers | 24 professional actors (12 male, 12 female) |
-| Task | Multi-class Classification |
-
-**Trained model files:**
-- `svm_best_model.pkl` — serialized SVM model
-- `svm_label_encoder.pkl` — serialized label encoder for emotion classes
+| Source | RAVDESS Dataset |
+| Format | `.wav` audio files |
+| Emotions | Neutral, Calm, Happy, Sad, Angry, Fearful, Disgust, Surprised (8 classes) |
+| Task | Multi-class Audio Classification |
 
 ---
 
 ## 🔧 Methodology
 
-### 1. Audio Feature Extraction — MFCC
-MFCCs represent the short-term power spectrum of a sound — they are the standard feature for speech processing:
-
+### 1. Feature Extraction — MFCC
 ```python
 import librosa
-import numpy as np
 
 def extract_features(file_path):
     audio, sr = librosa.load(file_path, sr=None)
-    mfccs = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=40)
-    return np.mean(mfccs.T, axis=0)  # Shape: (40,)
+    mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=40)
+    return np.mean(mfcc.T, axis=0)  # Shape: (40,)
 ```
+**What is MFCC?** A 40-dimensional feature vector representing the audio signal in a way that mimics human auditory perception. The most widely used feature set for speech recognition and audio classification.
 
-The result is a **40-dimensional feature vector** per audio file, saved to `features.csv`.
-
-### 2. Label Encoding
-Emotion labels (string) → integer codes:
+### 2. Data Preparation
 ```python
 from sklearn.preprocessing import LabelEncoder
+
 le = LabelEncoder()
-y_encoded = le.fit_transform(y)
-# Saved as: svm_label_encoder.pkl
+y_encoded = le.fit_transform(labels)  # 8 duygu → 0-7
+
+X_train, X_test, y_train, y_test = train_test_split(X, y_encoded,
+                                                      test_size=0.2, random_state=42)
 ```
 
-### 3. Train/Test Split + Scaling
+### 3. SVM Pipeline with GridSearchCV
 ```python
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled  = scaler.transform(X_test)
-```
-
-### 4. SVM Classifier
-Support Vector Machines are well-suited for high-dimensional audio feature spaces:
-```python
+from sklearn.pipeline import Pipeline
 from sklearn.svm import SVC
-svm = SVC(kernel='rbf', C=..., gamma=...)
-svm.fit(X_train_scaled, y_train)
-```
-Model was saved to `svm_best_model.pkl` for inference on new audio files.
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import GridSearchCV
 
-### 5. Real-time Inference
-The saved model and encoder allow classifying **any new WAV file**:
+pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('svm', SVC(probability=True))
+])
+
+param_grid = {
+    'svm__C':      [0.1, 1, 10, 100],
+    'svm__gamma':  ['scale', 'auto', 0.001, 0.01],
+    'svm__kernel': ['rbf', 'linear']
+}
+
+grid_search = GridSearchCV(pipeline, param_grid, cv=5,
+                            scoring='accuracy', n_jobs=-1)
+grid_search.fit(X_train, y_train)
+best_model = grid_search.best_estimator_
+```
+> Using StandardScaler inside a Pipeline prevents data leakage during cross-validation.
+
+### 4. Evaluation
 ```python
-import pickle, librosa, numpy as np
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 
-# Load model and encoder
-with open('svm_best_model.pkl', 'rb') as f:
-    model = pickle.load(f)
-with open('svm_label_encoder.pkl', 'rb') as f:
-    le = pickle.load(f)
+y_pred = best_model.predict(X_test)
+print(classification_report(y_test, y_pred))
 
-# Extract features from new audio
-features = extract_features('new_recording.wav').reshape(1, -1)
-
-# Predict emotion
-pred_label = le.inverse_transform(model.predict(features))
-print(f"Detected emotion: {pred_label[0]}")
+cm = confusion_matrix(y_test, y_pred)
+ConfusionMatrixDisplay(cm, display_labels=le.classes_).plot()
 ```
 
----
+### 5. Model Serialization + Real-time Prediction
+```python
+import joblib
+joblib.dump(best_model, 'emotion_model.joblib')
 
-## 🗂️ Versions
+def predict_emotion(file_path):
+    features = extract_features(file_path)
+    features = np.array(features).reshape(1, -1)
+    prediction = best_model.predict(features)
+    return le.inverse_transform(prediction)[0]
 
-| File | Description |
-|------|-------------|
-| `ravdess v1.ipynb` | Initial exploration: feature extraction, baseline SVM |
-| `ravdess_v2.ipynb` | Refined model: hyperparameter tuning, model serialization, inference pipeline |
+# Gerçek ses dosyaları üzerinde test
+predict_emotion('/content/drive/MyDrive/aa.wav')
+predict_emotion('/content/drive/MyDrive/angry.wav')
+```
 
 ---
 
 ## 📦 Libraries Used
-
 ```python
-librosa, numpy, pandas, sklearn (SVC, LabelEncoder, StandardScaler,
-train_test_split, classification_report), pickle, matplotlib
+pandas, numpy, librosa, joblib, matplotlib,
+sklearn (SVC, Pipeline, StandardScaler, LabelEncoder, GridSearchCV,
+train_test_split, classification_report, confusion_matrix, ConfusionMatrixDisplay)
 ```
 
 ---
 
 ## 💡 Key Takeaways
-
-- **MFCC is the gold standard** for audio feature extraction in speech tasks — it mimics the human ear's frequency response
-- SVM performs surprisingly well on MFCC features despite the dataset being relatively small
-- Saving both the model AND the label encoder is critical — without the encoder, predictions are uninterpretable integers
-- This architecture can be extended to real-time emotion detection in voice assistants, call centers, or mental health monitoring applications
-- Version 2 significantly improved over Version 1 by refining preprocessing and adding the inference pipeline
+- MFCC (40 coefficients) → represents audio in frequency bands that mirror human auditory perception; the strongest feature set for speech tasks
+- SVM is a strong baseline for small-to-medium audio datasets — performs well in high-dimensional MFCC space
+- Pipeline + GridSearchCV combination → prevents data leakage AND finds optimal hyperparameters
+- `probability=True` → enables SVC's predict_proba support, allowing confidence scores per class
+- Model saved with `joblib` can be deployed on new `.wav` files — a real-world inference pipeline
+- This is the only audio-based ML project in the portfolio — going beyond tabular data

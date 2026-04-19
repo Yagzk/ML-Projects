@@ -1,10 +1,10 @@
-# ⚾ Baseball Salary Prediction — Ridge & Lasso Regularization
+# ⚾ Baseball Salary — Ridge, Lasso & Polynomial Regression
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue) ![Algorithm](https://img.shields.io/badge/Algorithm-Ridge%20%7C%20Lasso-orange) ![Status](https://img.shields.io/badge/Status-Complete-brightgreen)
+![Python](https://img.shields.io/badge/Python-3.10+-blue) ![Algorithm](https://img.shields.io/badge/Algorithm-Ridge%20%7C%20Lasso%20%7C%20Pipeline-orange) ![Status](https://img.shields.io/badge/Status-Complete-brightgreen)
 
 ## 📌 Overview
 
-Predicting **Major League Baseball player salaries** using Ridge and Lasso regularization. This project compares the performance of standard Linear Regression against regularized models, and uses `GridSearchCV` with cross-validation to automatically find the optimal regularization strength (alpha).
+Comprehensive regularization study predicting Major League Baseball player salaries. Compares Linear Regression, Ridge, Lasso — both with and without Polynomial Features — and uses GridSearchCV with cross-validation to find optimal alpha values. Also demonstrates sklearn Pipeline to prevent data leakage in cross-validation.
 
 ---
 
@@ -12,85 +12,134 @@ Predicting **Major League Baseball player salaries** using Ridge and Lasso regul
 
 | Property | Value |
 |----------|-------|
-| Source | Hitters dataset (ISLR) |
+| Source | Hitters Dataset (ISLR) |
 | File | `hitters_processed.pkl` |
-| Task | Regression (salary prediction) |
 | Target | `Salary` (player annual salary in thousands USD) |
+| Task | Regression |
 
-**Features include:** At-bats, hits, home runs, runs, RBIs, walks, years played, career stats (CHits, CAtBat, etc.), league, division.
+**Features:** AtBat, Hits, HmRun, Runs, RBI, Walks, Years, career stats (CHits, CAtBat...), League, Division, NewLeague
 
 ---
 
 ## 🔧 Methodology
 
-### 1. Train/Test Split + Standardization
+### 1. Data Preparation
 ```python
+X = data.drop(columns=['Salary'])
+y = data['Salary']
+
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
 scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled  = scaler.transform(X_test)
 ```
 
 ### 2. Baseline — Linear Regression
-- Trained and evaluated on scaled data
-- Scatter plot: predicted vs actual values
-- **Observation:** Some predictions deviated significantly from the x=y line, indicating room for improvement
-
-### 3. Ridge Regression — L2 Regularization
-
-**Fixed alpha first (α=20):**
 ```python
+lr = LinearRegression()
+lr.fit(X_train_scaled, y_train)
+y_pred_lr = lr.predict(X_test_scaled)
+
+print(f"MSE: {mean_squared_error(y_test, y_pred_lr):.2f}")
+print(f"R²:  {r2_score(y_test, y_pred_lr):.2f}")
+```
+> **Finding:** Scatter plot shows predictions deviating significantly from the x=y line — regularization needed.
+
+### 3. Ridge — Sabit ve Otomatik Alpha
+```python
+# Fixed alpha
 ridge = Ridge(alpha=20)
-```
+ridge.fit(X_train_scaled, y_train)
 
-**Then automated with GridSearchCV:**
-```python
+# Automated with GridSearchCV
 ridge_params = {'alpha': np.logspace(-3, 3, 50)}
-ridge_grid = GridSearchCV(ridge, ridge_params, scoring='r2', cv=5)
+ridge_grid = GridSearchCV(Ridge(), ridge_params, scoring='r2', cv=5)
+ridge_grid.fit(X_train_scaled, y_train)
+best_ridge = ridge_grid.best_estimator_
 ```
-Ridge shrinks all coefficients toward zero but keeps all features — good when all features contribute something.
 
-### 4. Lasso Regression — L1 Regularization
-
-**Fixed alpha first (α=20):**
+### 4. Lasso — Sabit ve Otomatik Alpha
 ```python
+# Fixed alpha
 lasso = Lasso(alpha=20, max_iter=10000)
+
+# Automated with GridSearchCV
+lasso_params = {'alpha': np.logspace(-3, 0, 50)}
+lasso_grid = GridSearchCV(Lasso(max_iter=10000), lasso_params, scoring='r2', cv=5)
+lasso_grid.fit(X_train_scaled, y_train)
 ```
 
-**Then automated with GridSearchCV:**
+### 5. Alpha vs MSE Visualization
 ```python
-lasso_params = {'alpha': np.logspace(-3, 0, 50)}
-lasso_grid = GridSearchCV(lasso, lasso_params, scoring='r2', cv=5)
+# MSE computed per alpha and visualized
+# Ridge lowest MSE: alpha ≈ 10⁻³
+# Lasso lowest MSE: alpha between 10⁻¹ and 1
 ```
-Lasso performs **automatic feature selection** by shrinking some coefficients to exactly zero — useful for identifying the most important predictors.
+
+### 6. Polynomial Features Denemesi
+```python
+poly = PolynomialFeatures(degree=2, include_bias=False)
+X_train_poly = poly.fit_transform(X_train_c)
+X_test_poly  = poly.transform(X_test_c)
+
+# Polinom + Standardizasyon
+scaler = StandardScaler()
+X_train_poly_scaled = scaler.fit_transform(X_train_poly)
+X_test_poly_scaled  = scaler.transform(X_test_poly)
+
+lr_poly = LinearRegression()
+lr_poly.fit(X_train_poly_scaled, y_train_c)
+```
+> ⚠️ **Critical finding:** Adding polynomial features resulted in negative R². Too many features + multicollinearity → overfitting. Ridge and Lasso with polynomial features were also tested — they also produced poor R² values.
+
+### 7. Pipeline (Data Leakage Önleme)
+```python
+from sklearn.pipeline import Pipeline
+
+pipeline_ridge = Pipeline([
+    ('poly', PolynomialFeatures(degree=2, include_bias=False)),
+    ('scaler', StandardScaler()),
+    ('ridge', Ridge())
+])
+
+param_grid = {'ridge__alpha': np.logspace(-3, 3, 50)}
+grid = GridSearchCV(pipeline_ridge, param_grid, scoring='r2', cv=5)
+grid.fit(X_train, y_train)
+```
+> Pipeline fits each preprocessing step separately per fold during cross-validation, preventing data leakage.
 
 ---
 
-## 📉 Model Comparison
+## 📊 Model Karşılaştırması
 
-| Model | Alpha | Notes |
-|-------|-------|-------|
-| Linear Regression | — | Baseline, no regularization |
-| Ridge (fixed) | 20 | Manually set, suboptimal |
-| Ridge (GridSearchCV) | Auto (cv=5) | Best alpha via cross-validation |
-| Lasso (fixed) | 20 | Aggressive shrinkage |
-| Lasso (GridSearchCV) | Auto (cv=5) | Automatic feature selection |
+| Model | Notes |
+|-------|--------|
+| Linear Regression | Baseline; scatter plot shows significant deviation |
+| Ridge (alpha=20) | Manual, suboptimal |
+| Ridge (GridSearchCV) | Best alpha found via cross-validation |
+| Lasso (alpha=20) | Aggressive shrinkage |
+| Lasso (GridSearchCV) | Automatic feature selection |
+| Linear + Poly(degree=2) | R² negative → overfit |
+| Ridge/Lasso + Poly | Low R² → polynomial not suitable for this dataset |
+| Pipeline | Safest approach |
 
 ---
 
 ## 📦 Libraries Used
-
 ```python
-pandas, numpy, sklearn (LinearRegression, Ridge, Lasso, GridSearchCV, StandardScaler,
-train_test_split), matplotlib
+pandas, numpy, matplotlib,
+sklearn (LinearRegression, Ridge, Lasso, PolynomialFeatures,
+GridSearchCV, Pipeline, StandardScaler, train_test_split,
+mean_squared_error, r2_score)
 ```
 
 ---
 
 ## 💡 Key Takeaways
-
-- Regularization is essential when features are correlated (as in sports statistics)
-- **Ridge** is preferred when all features are believed to be relevant — it shrinks but doesn't eliminate
-- **Lasso** is preferred for feature selection — it eliminates irrelevant predictors entirely
-- Always tune alpha with `GridSearchCV` instead of guessing — `np.logspace(-3, 3, 50)` provides a good search range
-- Cross-validation (cv=5) ensures the best alpha generalizes to unseen data
+- Ridge shrinks all coefficients but keeps all features — L2 regularization
+- Lasso eliminates some coefficients entirely — L1 regularization = built-in feature selection
+- Polynomial features on correlated sports stats → overfitting (R² < 0) — feature space explodes
+- **Pipeline** prevents data leakage in cross-validation — always use it with preprocessing + CV
+- `np.logspace(-3, 3, 50)` provides a logarithmically spaced search range — better than linear for alpha
+- GridSearchCV result (best alpha) may differ from the manual MSE plot because CV uses validation splits

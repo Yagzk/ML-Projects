@@ -1,10 +1,10 @@
-# 🚗 Auto MPG — Linear Regression with VIF & Feature Engineering
+# 🚗 Auto MPG — Linear Regression + VIF + Ridge
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue) ![Algorithm](https://img.shields.io/badge/Algorithm-Linear%20Regression-orange) ![Status](https://img.shields.io/badge/Status-Complete-brightgreen)
+![Python](https://img.shields.io/badge/Python-3.10+-blue) ![Algorithm](https://img.shields.io/badge/Algorithm-Linear%20%7C%20Ridge%20Regression-orange) ![Status](https://img.shields.io/badge/Status-Complete-brightgreen)
 
 ## 📌 Overview
 
-Predicting a vehicle's **fuel efficiency (MPG — miles per gallon)** using the UCI Auto MPG dataset. This project focuses on diagnosing and resolving **multicollinearity** using VIF (Variance Inflation Factor) analysis, followed by feature engineering to build a cleaner, more reliable linear regression model.
+Predicting vehicle **fuel efficiency (MPG — miles per gallon)** using the UCI Auto MPG dataset. The core focus is diagnosing and resolving **multicollinearity** using VIF (Variance Inflation Factor) analysis, applying feature engineering, and comparing Linear Regression with Ridge. The final model is serialized with joblib.
 
 ---
 
@@ -12,9 +12,9 @@ Predicting a vehicle's **fuel efficiency (MPG — miles per gallon)** using the 
 
 | Property | Value |
 |----------|-------|
-| Source | UCI Machine Learning Repository (Auto MPG, id=9) |
+| Source | UCI Machine Learning Repository (`fetch_ucirepo(id=9)`) |
 | Rows | 392 vehicles |
-| Target | `mpg` (miles per gallon — continuous) |
+| Target | `mpg` — miles per gallon (continuous) |
 | Task | Regression |
 
 **Features:**
@@ -33,66 +33,108 @@ Predicting a vehicle's **fuel efficiency (MPG — miles per gallon)** using the 
 ## 🔧 Methodology
 
 ### 1. Data Cleaning
-- `horsepower` had 6 missing values → filled with **median**
-- `origin` is nominal (countries) → applied **One-Hot Encoding** to avoid false ordinal relationships
-
-### 2. Train/Test Split Before Scaling
 ```python
+X['horsepower'] = X['horsepower'].fillna(X['horsepower'].median())
+X = pd.get_dummies(X, columns=["origin"], drop_first=True)  # Nominal → One-Hot
+```
+
+### 2. Train/Test Split → Then Scale
+```python
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-# ✅ Scaling AFTER split to prevent data leakage
-scaler.fit_transform(X_train)
-scaler.transform(X_test)
+
+continuous = ["displacement", "horsepower", "weight", "acceleration"]
+scaler = StandardScaler()
+X_train[continuous] = scaler.fit_transform(X_train[continuous])
+X_test[continuous]  = scaler.transform(X_test[continuous])
 ```
 
 ### 3. Baseline Linear Regression
-- Trained on continuous features: `displacement`, `horsepower`, `weight`, `acceleration`
-- Evaluated with MAE, MSE, R²
-- Visualized predictions vs actual values using scatter plot
+```python
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-### 4. Multicollinearity Detection — VIF Analysis
+lr_model = LinearRegression()
+lr_model.fit(X_train[continuous], y_train)
+y_pred = lr_model.predict(X_test[continuous])
+
+print(f"MAE: {mean_absolute_error(y_test, y_pred):.4f}")
+print(f"MSE: {mean_squared_error(y_test, y_pred):.4f}")
+print(f"R²:  {r2_score(y_test, y_pred):.4f}")
 ```
-High VIF detected (VIF > 10):
-- displacement  → very high
-- cylinders     → very high
-- weight        → very high
-- horsepower    → high
+
+### 4. VIF Analysis — Multicollinearity Detection
+```python
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+vif_data = pd.DataFrame()
+vif_data['Feature'] = df_local.columns
+vif_data['VIF'] = [variance_inflation_factor(df_local.values, i)
+                   for i in range(df_local.shape[1])]
 ```
-Conclusion: **Strong multicollinearity** among engine-related features reduces model reliability.
+
+**High VIF detected:**
+- `displacement`, `cylinders`, `weight`, `horsepower` → very high VIF (>10)
+
+> **Note:** `model_year` consistently inflated VIF regardless of any transformations applied — it had to be excluded.
 
 ### 5. Feature Engineering to Reduce VIF
+```python
+X["displacement_per_cyl"]    = X["displacement"] / X["cylinders"]
+X["acceleration_per_weight"] = X["acceleration"] / X["weight"]
 
-| New Feature | Formula | Rationale |
-|-------------|---------|-----------|
-| `displacement_per_cyl` | `displacement / cylinders` | Combines two correlated features into one |
-| `acceleration_per_weight` | `acceleration / weight` | Power-to-weight ratio proxy |
+# Original high-VIF columns dropped
+df_dropped = df_local.drop(columns=['horsepower','weight','displacement',
+                                     'acceleration','model_year','cylinders'])
+```
 
-**Result:** Dropped `horsepower`, `weight`, `displacement`, `acceleration`, `model_year`, `cylinders` → significantly reduced VIF values.
+### 6. Ridge Regression (Final Model)
+```python
+from sklearn.linear_model import Ridge
 
-> **Note:** `model_year` was also removed as it consistently increased VIF regardless of transformations.
+X_train, X_test, y_train, y_test = train_test_split(df_dropped, y, test_size=0.2, random_state=42)
 
----
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled  = scaler.transform(X_test)
 
-## 📉 Results
+ridge_model = Ridge(alpha=1.0)
+ridge_model.fit(X_train_scaled, y_train)
+y_pred = ridge_model.predict(X_test_scaled)
 
-| Model | Notes |
-|-------|-------|
-| Baseline (raw features) | High multicollinearity, inflated coefficients |
-| After VIF + Feature Eng. | Lower VIF, more stable and interpretable model |
+print(f"MAE: {mean_absolute_error(y_test, y_pred):.4f}")
+print(f"MSE: {mean_squared_error(y_test, y_pred):.4f}")
+print(f"R²:  {r2_score(y_test, y_pred):.4f}")
+```
+
+> **Finding:** Higher displacement-per-cylinder reduces MPG (heavier engine → more fuel). Higher acceleration-per-weight increases MPG (efficient power-to-weight ratio). Coefficient directions align with real-world physics.
+
+### 7. Model Serialization
+```python
+from joblib import dump
+dump(lr_model, 'mpg.joblib')
+```
 
 ---
 
 ## 📦 Libraries Used
-
 ```python
-pandas, numpy, sklearn (LinearRegression, StandardScaler, train_test_split),
-statsmodels (variance_inflation_factor), matplotlib, seaborn
+pandas, numpy, matplotlib, seaborn,
+ucimlrepo (fetch_ucirepo),
+sklearn (LinearRegression, Ridge, StandardScaler, train_test_split,
+mean_absolute_error, mean_squared_error, r2_score),
+statsmodels (variance_inflation_factor),
+joblib
 ```
 
 ---
 
 ## 💡 Key Takeaways
-
-- **Multicollinearity** doesn't hurt predictions much but destroys coefficient interpretability
-- VIF > 10 signals a serious problem — either remove the feature or engineer a combined one
-- One-Hot Encoding for `origin` was crucial — treating countries as 1/2/3 would imply Japan > Europe > USA, which is meaningless
-- Always split data before scaling to avoid information leakage from the test set
+- **Multicollinearity** doesn't ruin predictions but destroys coefficient interpretability — VIF > 10 is serious
+- Feature engineering (`displacement / cylinders`) is more powerful than simply dropping features
+- `model_year` was impossible to include without inflating VIF — domain constraints sometimes override intuition
+- One-Hot Encoding for `origin` is essential — treating USA=1, Europe=2, Japan=3 implies ordering that doesn't exist
+- Ridge was applied after feature engineering to additionally penalize remaining multicollinearity
+- Always split data **before** scaling — fitting scaler on full data leaks test information
